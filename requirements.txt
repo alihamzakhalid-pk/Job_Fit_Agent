@@ -1,0 +1,15 @@
+langchain==0.3.7
+langgraph==0.2.28
+langchain-groq==0.2.1
+langchain-community==0.3.7
+langchain-core==0.3.15
+tavily-python==0.5.0
+duckduckgo-search==6.3.7
+pdfplumber==0.11.4
+PyPDF2==3.0.1
+faiss-cpu==1.9.0
+streamlit==1.40.1
+fastapi==0.115.4
+uvicorn==0.32.0
+python-dotenv==1.0.1
+tenacity==8.2.3
