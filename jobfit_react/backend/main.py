@@ -15,7 +15,7 @@ app = FastAPI(title="Job Fit Agent API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["https://frontend-fxpd42ne2-ali-hamzas-projects-7e01b8b8.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
