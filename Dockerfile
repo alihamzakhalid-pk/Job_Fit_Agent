@@ -26,4 +26,4 @@ COPY . .
 EXPOSE 8000
 
 # Use Railway dynamic port
-CMD ["sh", "-c", "uvicorn jobfit_react.backend.main:app --host 0.0.0.0 --port $PORT"]
+CMD ["sh", "-c", "uvicorn jobfit_react.backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
