@@ -22,8 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
-# Expose port
+# Expose port (optional but okay to keep 8000)
 EXPOSE 8000
 
-# Run the app
-CMD ["uvicorn", "jobfit_react.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use Railway dynamic port
+CMD ["sh", "-c", "uvicorn jobfit_react.backend.main:app --host 0.0.0.0 --port $PORT"]
