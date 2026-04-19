@@ -180,13 +180,14 @@ def compile_final_report(state: AgentState) -> AgentState:
         "learning_roadmap": skill_gaps.get("learning_roadmap", []),
         "rewritten_bullets": rewritten.get("rewritten_bullets", []),
         "resume_summary": rewritten.get("resume_summary", ""),
-        "interview_questions": questions,  # ← Include ALL questions (10+), not just 5
+        "interview_questions": questions,
         "sources": market_skills.get("sources", [])[:5],
         "candidate_summary": skill_gaps.get("candidate_summary", ""),
         "quick_wins": skill_gaps.get("quick_wins", []),
         "hallucinations_found": len(hallucination_report) > 0,
         "hallucination_report": hallucination_report,
         "hallucinations_removed": len(hallucination_report),
+        "debug_input_hashes": state.get("input_hashes", {}),  # ← DEBUG: Include input fingerprints
     }
 
     state["final_report"] = report
@@ -305,8 +306,10 @@ def run_agent(resume_text: str, job_description: str) -> dict:
         "needs_retry": False,
         "retry_agent": "none",
         "retry_count": 0,
+        "hallucination_report": [],
         "final_report": {},
-        "messages": []
+        "messages": [],
+        "input_hashes": input_hashes,  # ← DEBUG: Track input consistency
     }
 
     app = build_graph()

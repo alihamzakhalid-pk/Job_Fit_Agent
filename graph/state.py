@@ -28,6 +28,7 @@ class AgentState(TypedDict):
     needs_retry: bool
     retry_agent: str
     retry_count: int
+    input_hashes: dict  # ← DEBUG: Resume & job desc fingerprints
     final_report: dict
 
     # MEMORY
