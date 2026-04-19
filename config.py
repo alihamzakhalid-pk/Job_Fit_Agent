@@ -14,6 +14,7 @@ load_dotenv()
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 LLM_TEMPERATURE_PARSING = 0  # For resume parsing, gap analysis (deterministic)
 LLM_TEMPERATURE_REWRITING = 0.3  # For resume rewriting (slightly creative)
+LLM_TEMPERATURE_REFLECTION = 0.5  # For self-reflection (balanced - allows variation)
 LLM_TIMEOUT = 30  # seconds - prevent hanging on slow API
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

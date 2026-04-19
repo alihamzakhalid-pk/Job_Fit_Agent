@@ -6,13 +6,20 @@ from agents.market_research import market_research_agent
 from agents.gap_analyzer import gap_analyzer_agent
 from agents.resume_rewriter import resume_rewriter_agent
 from tools.retry_utils import llm_retry_decorator
-from config import LLM_MODEL, LLM_TEMPERATURE_PARSING, LLM_TIMEOUT, MIN_RESUME_CHARS, MIN_JOB_DESC_CHARS
+from config import LLM_MODEL, LLM_TEMPERATURE_PARSING, LLM_TEMPERATURE_REFLECTION, LLM_TIMEOUT, MIN_RESUME_CHARS, MIN_JOB_DESC_CHARS
 import json
 
 # Initialize LLM for orchestrator
 llm = ChatGroq(
     model=LLM_MODEL,
     temperature=LLM_TEMPERATURE_PARSING,
+    timeout=LLM_TIMEOUT,
+)
+
+# Separate LLM for self-reflection (with variation)
+llm_reflection = ChatGroq(
+    model=LLM_MODEL,
+    temperature=LLM_TEMPERATURE_REFLECTION,
     timeout=LLM_TIMEOUT,
 )
 
@@ -71,7 +78,7 @@ def self_reflection_node(state: AgentState) -> AgentState:
     try:
         @llm_retry_decorator
         def reflect_with_retry():
-            return llm.invoke(reflection_prompt)
+            return llm_reflection.invoke(reflection_prompt)
         
         response = reflect_with_retry()
         raw = response.content.replace("```json", "").replace("```", "").strip()
