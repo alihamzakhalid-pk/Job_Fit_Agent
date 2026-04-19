@@ -5,7 +5,7 @@ import Pipeline from './components/Pipeline.jsx'
 import Dashboard from './components/Dashboard.jsx'
 
 // API Configuration - Works for both local and production
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 const STEPS = [
   { id: 'resume_parser',    label: 'Resume Parser',    desc: 'Extracting skills, experience, education' },
