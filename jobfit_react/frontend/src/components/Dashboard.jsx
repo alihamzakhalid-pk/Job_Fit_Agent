@@ -251,94 +251,112 @@ function RewriteTab({ report }) {
 // ── Tab: Roadmap ─────────────────────────────
 function RoadmapTab({ report }) {
   const roadmap = report.learning_roadmap || []
+  const [expandedWeeks, setExpandedWeeks] = useState({})
 
   if (roadmap.length === 0) return <div style={s.emptyState}>No roadmap generated.</div>
+
+  const toggleWeek = (weekIndex) => {
+    setExpandedWeeks(prev => ({
+      ...prev,
+      [weekIndex]: !prev[weekIndex]
+    }))
+  }
 
   return (
     <div>
       <div style={s.sectionTitle}>Week by week learning roadmap</div>
-      {roadmap.map((week, i) => (
-        <div key={i} style={{ ...s.weekCard, ...s.weekCardOpen }}>
-          <div style={s.weekHeader}>
-            <div style={s.weekLeft}>
-              <span style={s.weekNum}>Week {week.week}</span>
-              <span style={s.weekFocus}>{week.focus}</span>
-              {week.duration_hours && <span style={s.durationBadge}>{week.duration_hours}h</span>}
-            </div>
-            <div style={s.weekRight}>
-              {(week.skills || []).slice(0, 3).map((sk, j) => (
-                <span key={j} style={s.skillChip}>{sk}</span>
-              ))}
-            </div>
-          </div>
-          <div style={s.weekBody}>
-            <div style={s.weekGoal}><strong>📍 Goal:</strong> {week.goal}</div>
-            
-            {week.daily_plan?.length > 0 && (
-              <div style={s.dailyPlan}>
-                <div style={s.weekResTitle}>📅 Daily Plan:</div>
-                {week.daily_plan.map((day, j) => (
-                  <div key={j} style={s.dayItem}>
-                    <span style={s.dayDot}>•</span>
-                    <span>{day}</span>
-                  </div>
+      {roadmap.map((week, i) => {
+        const isExpanded = expandedWeeks[i]
+        return (
+          <div key={i} style={{ ...s.weekCard, ...(isExpanded ? s.weekCardOpen : {}) }}>
+            <button 
+              style={s.weekHeaderBtn}
+              onClick={() => toggleWeek(i)}
+            >
+              <div style={s.weekLeft}>
+                <span style={s.weekNum}>Week {week.week}</span>
+                <span style={s.weekFocus}>{week.focus}</span>
+                {week.duration_hours && <span style={s.durationBadge}>{week.duration_hours}h</span>}
+              </div>
+              <div style={s.weekRight}>
+                {(week.skills || []).slice(0, 3).map((sk, j) => (
+                  <span key={j} style={s.skillChip}>{sk}</span>
                 ))}
+                <span style={{ ...s.expandIcon, transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
               </div>
-            )}
-
-            {week.resources?.length > 0 && (
-              <div style={s.weekResources}>
-                <div style={s.weekResTitle}>🔗 Resources:</div>
-                {week.resources.map((r, j) => {
-                  if (typeof r === 'object' && r.url) {
-                    return (
-                      <div key={j} style={s.resourceItem}>
-                        <div style={s.resHeader}>
-                          <a href={r.url} target="_blank" rel="noreferrer" style={s.resLink}>
-                            {r.name}
-                          </a>
-                          <span style={s.resType}>{r.type}</span>
-                          {r.free && <span style={s.freeBadge}>FREE</span>}
-                        </div>
-                        {r.duration && <div style={s.resDuration}>⏱️ {r.duration}</div>}
+            </button>
+            
+            {isExpanded && (
+              <div style={s.weekBody}>
+                <div style={s.weekGoal}><strong>📍 Goal:</strong> {week.goal}</div>
+                
+                {week.daily_plan?.length > 0 && (
+                  <div style={s.dailyPlan}>
+                    <div style={s.weekResTitle}>📅 Daily Plan:</div>
+                    {week.daily_plan.map((day, j) => (
+                      <div key={j} style={s.dayItem}>
+                        <span style={s.dayDot}>•</span>
+                        <span>{day}</span>
                       </div>
-                    )
-                  }
-                  return (
-                    <div key={j} style={s.weekRes}>
-                      {typeof r === 'string' && r.startsWith('http')
-                        ? <a href={r} target="_blank" rel="noreferrer" style={s.resLink}>{r}</a>
-                        : <span style={s.resText}>{r}</span>
+                    ))}
+                  </div>
+                )}
+
+                {week.resources?.length > 0 && (
+                  <div style={s.weekResources}>
+                    <div style={s.weekResTitle}>🔗 Resources:</div>
+                    {week.resources.map((r, j) => {
+                      if (typeof r === 'object' && r.url) {
+                        return (
+                          <div key={j} style={s.resourceItem}>
+                            <div style={s.resHeader}>
+                              <a href={r.url} target="_blank" rel="noreferrer" style={s.resLink}>
+                                {r.name}
+                              </a>
+                              <span style={s.resType}>{r.type}</span>
+                              {r.free && <span style={s.freeBadge}>FREE</span>}
+                            </div>
+                            {r.duration && <div style={s.resDuration}>⏱️ {r.duration}</div>}
+                          </div>
+                        )
                       }
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+                      return (
+                        <div key={j} style={s.weekRes}>
+                          {typeof r === 'string' && r.startsWith('http')
+                            ? <a href={r} target="_blank" rel="noreferrer" style={s.resLink}>{r}</a>
+                            : <span style={s.resText}>{r}</span>
+                          }
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
-            {week.practice_project && (
-              <div style={s.projectSection}>
-                <div style={s.weekResTitle}>🎯 Practice Project:</div>
-                <div style={s.projectText}>{week.practice_project}</div>
-              </div>
-            )}
+                {week.practice_project && (
+                  <div style={s.projectSection}>
+                    <div style={s.weekResTitle}>🎯 Practice Project:</div>
+                    <div style={s.projectText}>{week.practice_project}</div>
+                  </div>
+                )}
 
-            {week.success_criteria && (
-              <div style={s.criteriaSection}>
-                <div style={s.weekResTitle}>✅ Success Criteria:</div>
-                {Array.isArray(week.success_criteria) 
-                  ? week.success_criteria.map((c, j) => (
-                      <div key={j} style={s.criteriaItem}>
-                        <span style={s.checkmark}>✓</span> {c}
-                      </div>
-                    ))
-                  : <div style={s.criteriaItem}>{week.success_criteria}</div>
-                }
+                {week.success_criteria && (
+                  <div style={s.criteriaSection}>
+                    <div style={s.weekResTitle}>✅ Success Criteria:</div>
+                    {Array.isArray(week.success_criteria) 
+                      ? week.success_criteria.map((c, j) => (
+                          <div key={j} style={s.criteriaItem}>
+                            <span style={s.checkmark}>✓</span> {c}
+                          </div>
+                        ))
+                      : <div style={s.criteriaItem}>{week.success_criteria}</div>
+                    }
+                  </div>
+                )}
               </div>
             )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -579,6 +597,12 @@ const s = {
     boxShadow: '0 0 1px rgba(255,255,255,0.08) inset',
   },
   weekCardOpen: { borderColor: 'rgba(124,108,250,0.3)' },
+  weekHeaderBtn: {
+    width: '100%', background: 'transparent', border: 'none',
+    padding: '16px 18px',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: '12px', cursor: 'pointer', transition: 'background 0.2s',
+  },
   weekHeader: {
     width: '100%', background: 'transparent', border: 'none',
     padding: '16px 18px',
@@ -602,6 +626,10 @@ const s = {
     fontSize: '11px', color: 'var(--muted)',
     background: 'var(--bg3)', border: '1px solid var(--border)',
     padding: '2px 8px', borderRadius: '4px',
+  },
+  expandIcon: {
+    fontSize: '12px', color: 'var(--accent2)', transition: 'transform 0.3s ease',
+    marginLeft: 'auto', display: 'flex', alignItems: 'center',
   },
   weekBody: {
     padding: '0 18px 18px',

@@ -24,7 +24,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 MIN_RESUME_CHARS = 100
 MAX_RESUME_CHARS = 10000
 MIN_JOB_DESC_CHARS = 50
-MAX_JOB_DESC_CHARS = 2000
+MAX_JOB_DESC_CHARS = 50000
 
 # ============================================================================
 # MARKET RESEARCH SETTINGS
