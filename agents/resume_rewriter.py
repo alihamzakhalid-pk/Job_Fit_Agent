@@ -20,79 +20,64 @@ llm = ChatGroq(
 )
 
 REWRITER_PROMPT = """
-You are an expert resume writer. Your job is to rewrite resume bullets
-to be clearer, stronger, and ATS-optimized.
+You are an expert resume writer, ATS optimization specialist, AND interview coach.
+Rewrite resume bullets to be ATS-optimized AND generate comprehensive interview prep questions.
+Return ONLY valid JSON. No explanation. No extra text.
 
-CRITICAL RULE — READ THIS FIRST:
-You are STRICTLY FORBIDDEN from inventing any of the following:
-- Percentages (e.g. 94% accuracy, 40% improvement)
-- Scale numbers (e.g. 10k users, 50k requests, 1M records)
-- Time savings (e.g. reduced time by 60%)
-- Any metric NOT explicitly found in the original resume text below
-
-If a bullet has NO metrics in the original → rewrite it WITHOUT metrics.
-Describe the ACTION and IMPACT using strong verbs only.
-NEVER fill gaps with made-up numbers to sound impressive.
-
-ORIGINAL RESUME TEXT (source of truth — only use facts from here):
-{resume_text}
-
-BULLET POINTS TO REWRITE:
+ORIGINAL BULLET POINTS:
 {original_bullets}
 
 TARGET JOB DESCRIPTION:
 {job_description}
 
-CANDIDATE STRENGTHS:
+CANDIDATE STRENGTHS TO HIGHLIGHT:
 {skill_gaps}
 
-REWRITING RULES:
+RESUME REWRITING RULES:
 1. Start every bullet with a strong action verb
-2. ONLY use metrics that exist in the original resume text above
-3. Include relevant keywords from the job description
-4. Keep each bullet 12-25 words
-5. Remove weak phrases: worked on, helped with, assisted in, was responsible for
-6. Show what you DID not just what you were assigned
-7. If original has a metric — keep it and highlight it
-8. If original has NO metric — use strong verbs and context only
+2. Add specific metrics and numbers where possible
+3. Include relevant keywords from job description
+4. Keep each bullet 15-25 words
+5. Remove weak phrases like worked on or helped with
+6. Show impact not just tasks
 
-GOOD EXAMPLE (metric exists in original):
-Original: "Flask app using Naive Bayes with 96% accuracy"
-Rewritten: "Engineered Naive Bayes text classifier achieving 96% accuracy with live YouTube API integration"
-Reason: 96% came from original — safe to use ✅
+INTERVIEW QUESTIONS RULES:
+Generate at least 10 most important interview questions that would REALLY be asked:
+- 3-4 TECHNICAL questions (testing skills, tools, frameworks)
+- 3-4 BEHAVIORAL questions (testing soft skills, leadership, collaboration)
+- 2-3 SITUATIONAL questions (testing problem-solving, decision-making)
+Each question should be:
+- Directly related to the job description
+- Challenging and realistic (what real interviewers ask)
+- Testing either their strengths or skill gaps
+- Clear and professional
 
-BAD EXAMPLE (metric invented):
-Original: "Built a resume analyzer system"
-Rewritten: "Built resume analyzer achieving 94% accuracy serving 10k users"
-Reason: 94% and 10k were invented — NEVER do this ❌
-
-Return ONLY valid JSON. No explanation. No extra text:
+Return this exact JSON:
 {{
     "rewritten_bullets": [
         {{
             "original": "original bullet text",
-            "rewritten": "improved bullet with no invented metrics",
-            "improvement_reason": "what specifically was improved",
-            "keywords_added": [],
-            "metrics_used": "none OR list real metrics from original",
-            "invented_metrics": false
+            "rewritten": "improved bullet text",
+            "improvement_reason": "why this is better",
+            "keywords_added": []
         }}
     ],
     "interview_questions": [
         {{
-            "question": "",
+            "question": "Full question text here",
             "category": "one of: technical/behavioral/situational",
-            "why_asked": "why interviewer would ask this",
-            "tip": "how to answer this well"
+            "why_asked": "why an interviewer would ask this question for this role",
+            "tip": "how to answer this question well based on the job description",
+            "difficulty": "one of: junior/mid/senior"
         }}
     ],
-    "resume_summary": "2-3 sentence professional summary using ONLY facts from the resume"
+    "resume_summary": "A powerful 2-3 sentence professional summary for this specific job"
 }}
 """
 
 prompt = PromptTemplate(
     template=REWRITER_PROMPT,
-    input_variables=["resume_text", "original_bullets", "job_description", "skill_gaps"]
+    input_variables=["original_bullets", "job_description", "skill_gaps"]
 )
 
 
@@ -110,85 +95,8 @@ def format_gaps_for_prompt(skill_gaps: dict) -> str:
         lines.append(f"Candidate strengths: {', '.join(strengths)}")
     critical = [g["name"] for g in gaps if g.get("priority") == "critical"]
     if critical:
-        lines.append(f"Missing skills — do NOT claim candidate has these: {', '.join(critical)}")
+        lines.append(f"Critical gaps to avoid overstating: {', '.join(critical)}")
     return "\n".join(lines) if lines else "No gap data"
-
-
-# ─────────────────────────────────────────
-# HALLUCINATION CHECKER PROMPT
-# ─────────────────────────────────────────
-
-HALLUCINATION_CHECK_PROMPT = """
-You are a strict factual accuracy checker for resumes.
-Your ONLY job is to detect invented or exaggerated claims.
-
-ORIGINAL RESUME TEXT (ground truth — only facts here are real):
-{resume_text}
-
-REWRITTEN BULLETS TO VERIFY:
-{rewritten_bullets}
-
-For each rewritten bullet, check:
-1. Does every number or percentage exist in the original resume text?
-2. Was any scale invented (users, requests, records, downloads)?
-3. Was any performance metric fabricated?
-
-Return ONLY valid JSON:
-{{
-    "hallucinations_found": false,
-    "total_checked": 0,
-    "violations": [
-        {{
-            "original_bullet": "the rewritten bullet containing fake data",
-            "invented_claim": "exactly what was invented e.g. 94% accuracy",
-            "clean_rewrite": "safe version without the invented claim"
-        }}
-    ],
-    "verified_bullets": [
-        {{
-            "original": "original bullet text",
-            "rewritten": "verified clean rewritten bullet",
-            "improvement_reason": "what was improved",
-            "keywords_added": [],
-            "metrics_used": "none or list real metrics",
-            "invented_metrics": false
-        }}
-    ]
-}}
-"""
-
-
-def run_hallucination_check(llm_check, resume_text: str, rewritten_bullets: list) -> tuple:
-    """
-    Cross-checks every rewritten bullet against original resume text.
-
-    Returns:
-        violations (list) — invented claims that were caught
-        verified   (list) — clean bullets safe to show user
-    """
-    try:
-        bullets_text = json.dumps(rewritten_bullets, indent=2)
-
-        response = llm_check.invoke(
-            HALLUCINATION_CHECK_PROMPT.format(
-                resume_text=resume_text[:3000],
-                rewritten_bullets=bullets_text[:3000]
-            )
-        )
-
-        result     = clean_and_parse_json(response.content)
-        violations = result.get("violations", [])
-        verified   = result.get("verified_bullets", [])
-
-        # Safety fallback — if checker returns empty, keep originals
-        if not verified:
-            verified = rewritten_bullets
-
-        return violations, verified
-
-    except Exception as e:
-        print(f"   ⚠️  Hallucination checker error: {e} — skipping check")
-        return [], rewritten_bullets
 
 
 def clean_and_parse_json(raw_output: str) -> dict:
@@ -202,34 +110,26 @@ def clean_and_parse_json(raw_output: str) -> dict:
 
 def resume_rewriter_agent(state: AgentState) -> AgentState:
     """
-    Agent 4: Rewrites resume bullets with TRUTH CONSTRAINTS + HALLUCINATION CHECK.
-
-    Design decisions:
-    - Prompt explicitly forbids inventing metrics
-    - Ground truth (original resume) passed directly into prompt
-    - Second LLM call verifies every bullet after rewriting
-    - Any invented claim is removed before showing to user
-
-    Reads from state:  parsed_resume, resume_text, skill_gaps, job_description
-    Writes to state:   rewritten_bullets, ats_score_before, ats_score_after,
-                       interview_questions, hallucination_report
+    Agent 4: Rewrites resume bullets + scores ATS + generates questions.
+    Reads from state:  parsed_resume, skill_gaps, job_description
+    Writes to state:   rewritten_bullets, ats_score_before, ats_score_after, interview_questions
     """
 
-    print("\n✍️  Agent 4: Rewriting resume with truth constraints...")
+    print("\n✍️  Agent 4: Rewriting resume + scoring ATS...")
 
     try:
         parsed_resume = state["parsed_resume"]
         skill_gaps = state["skill_gaps"]
         job_description = state["job_description"]
-        resume_text = state["resume_text"]  # ← ground truth
 
         original_bullets = extract_bullets_from_resume(parsed_resume)
 
         if not original_bullets:
-            print("   ⚠️  No bullets found in parsed resume")
+            print("   ⚠️  No bullets found — using placeholder bullets")
             original_bullets = [
-                "Worked on software development projects",
-                "Helped team with technical tasks",
+                "Worked on machine learning projects",
+                "Helped team with data analysis tasks",
+                "Participated in software development"
             ]
 
         print(f"   → Found {len(original_bullets)} bullet points")
@@ -239,12 +139,11 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         ats_before = before_result["overall_score"]
         print(f"   → ATS Score BEFORE: {ats_before}/100")
 
-        print("   → Rewriting with truth-constrained prompt...")
+        print("   → Rewriting bullets with LLM...")
         @llm_retry_decorator
         def rewrite_with_retry():
             chain = prompt | llm
             return chain.invoke({
-                "resume_text": resume_text[:3000],
                 "original_bullets": format_bullets_for_prompt(original_bullets),
                 "job_description": job_description[:MAX_JOB_DESC_CHARS],
                 "skill_gaps": format_gaps_for_prompt(skill_gaps)
@@ -252,26 +151,9 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         
         response = rewrite_with_retry()
         rewrite_data = clean_and_parse_json(response.content)
-        rewritten_bullets = rewrite_data.get("rewritten_bullets", [])
-
-        # ── Step 4: Hallucination check ──
-        print("   → Running hallucination check...")
-        violations, verified = run_hallucination_check(
-            llm, resume_text, rewritten_bullets
-        )
-
-        if violations:
-            print(f"   ⚠️  {len(violations)} hallucination(s) detected and fixed:")
-            for v in violations:
-                print(f"      Removed claim: '{v.get('invented_claim', '')}'")
-            rewrite_data["rewritten_bullets"] = verified
-        else:
-            print(f"   ✅ Hallucination check passed — all bullets verified")
-
-        rewrite_data["hallucinations_found"] = len(violations) > 0
 
         rewritten_list = [
-            item.get("rewritten", "")
+            item["rewritten"]
             for item in rewrite_data.get("rewritten_bullets", [])
             if item.get("rewritten")
         ]
@@ -279,24 +161,20 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         print("   → Scoring rewritten resume (after)...")
         after_result = score_full_resume(rewritten_list)
         ats_after = after_result["overall_score"]
-        improvement = ats_after - ats_before
-        print(f"   → ATS Score AFTER: {ats_after}/100 (+{improvement})")
+        print(f"   → ATS Score AFTER: {ats_after}/100")
 
         rewrite_data["ats_before"] = {"score": ats_before, "breakdown": before_result["breakdown"]}
         rewrite_data["ats_after"] = {"score": ats_after, "breakdown": after_result["breakdown"]}
-        rewrite_data["improvement"] = improvement
+        rewrite_data["improvement"] = ats_after - ats_before
 
         state["rewritten_bullets"] = rewrite_data
         state["ats_score_before"] = ats_before
         state["ats_score_after"] = ats_after
         state["interview_questions"] = rewrite_data.get("interview_questions", [])
-        state["hallucination_report"] = violations
 
         print(f"✅ Agent 4: Complete")
-        print(f"   ATS: {ats_before} → {ats_after} (+{improvement})")
+        print(f"   ATS: {ats_before} → {ats_after} (+{ats_after - ats_before})")
         print(f"   Interview questions: {len(state['interview_questions'])}")
-        if violations:
-            print(f"   Hallucinations caught & fixed: {len(violations)}")
 
     except Exception as e:
         print(f"❌ Agent 4 Error: {e}")
@@ -304,6 +182,5 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         state["ats_score_before"] = 0
         state["ats_score_after"] = 0
         state["interview_questions"] = []
-        state["hallucination_report"] = []
 
     return state

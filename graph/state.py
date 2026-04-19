@@ -21,14 +21,12 @@ class AgentState(TypedDict):
     ats_score_before: int
     ats_score_after: int
     interview_questions: list
-    hallucination_report: list   # ← NEW: violations caught and fixed
 
     # ORCHESTRATOR
     confidence_score: float
     needs_retry: bool
     retry_agent: str
     retry_count: int
-    input_hashes: dict  # ← DEBUG: Resume & job desc fingerprints
     final_report: dict
 
     # MEMORY

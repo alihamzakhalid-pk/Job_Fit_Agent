@@ -93,7 +93,6 @@ export default function App() {
           <span style={styles.logoDot} />
           <span style={styles.logoText}>JobFit<span style={styles.logoAccent}>Agent</span></span>
         </div>
-        <div style={styles.badge}>Multi-Agent AI · Powered by LangGraph</div>
         {phase === 'done' && (
           <button style={styles.resetBtn} onClick={handleReset}>← New Analysis</button>
         )}

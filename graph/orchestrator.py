@@ -8,7 +8,6 @@ from agents.resume_rewriter import resume_rewriter_agent
 from tools.retry_utils import llm_retry_decorator
 from config import LLM_MODEL, LLM_TEMPERATURE_PARSING, LLM_TEMPERATURE_REFLECTION, LLM_TIMEOUT, MIN_RESUME_CHARS, MIN_JOB_DESC_CHARS
 import json
-import hashlib
 
 # Initialize LLM for orchestrator
 llm = ChatGroq(
@@ -23,25 +22,6 @@ llm_reflection = ChatGroq(
     temperature=LLM_TEMPERATURE_REFLECTION,
     timeout=LLM_TIMEOUT,
 )
-
-
-def hash_inputs(resume_text: str, job_description: str) -> dict:
-    """
-    Create reproducible hashes of inputs to verify consistency.
-    Use this to debug why results differ.
-    """
-    resume_hash = hashlib.md5(resume_text.encode()).hexdigest()[:8]
-    job_hash = hashlib.md5(job_description.encode()).hexdigest()[:8]
-    combined_hash = hashlib.md5(
-        f"{resume_text}{job_description}".encode()
-    ).hexdigest()[:8]
-    
-    return {
-        "resume_hash": resume_hash,
-        "job_hash": job_hash,
-        "combined_hash": combined_hash
-    }
-
 
 
 def self_reflection_node(state: AgentState) -> AgentState:
@@ -161,7 +141,6 @@ def compile_final_report(state: AgentState) -> AgentState:
     rewritten = state.get("rewritten_bullets", {})
     questions = state.get("interview_questions", [])
     parsed_resume = state.get("parsed_resume", {})
-    hallucination_report = state.get("hallucination_report", [])
 
     gaps = skill_gaps.get("skill_gaps", [])
     critical_gaps = [g for g in gaps if g.get("priority") == "critical"]
@@ -180,14 +159,10 @@ def compile_final_report(state: AgentState) -> AgentState:
         "learning_roadmap": skill_gaps.get("learning_roadmap", []),
         "rewritten_bullets": rewritten.get("rewritten_bullets", []),
         "resume_summary": rewritten.get("resume_summary", ""),
-        "interview_questions": questions,
+        "interview_questions": questions,  # ← Include ALL questions (10+), not just 5
         "sources": market_skills.get("sources", [])[:5],
         "candidate_summary": skill_gaps.get("candidate_summary", ""),
-        "quick_wins": skill_gaps.get("quick_wins", []),
-        "hallucinations_found": len(hallucination_report) > 0,
-        "hallucination_report": hallucination_report,
-        "hallucinations_removed": len(hallucination_report),
-        "debug_input_hashes": state.get("input_hashes", {}),  # ← DEBUG: Include input fingerprints
+        "quick_wins": skill_gaps.get("quick_wins", [])
     }
 
     state["final_report"] = report
@@ -195,8 +170,6 @@ def compile_final_report(state: AgentState) -> AgentState:
     print(f"✅ Final report compiled for {report['candidate_name']}")
     print(f"   Match Score: {report['match_score']}%")
     print(f"   ATS: {report['ats_score_before']} → {report['ats_score_after']}")
-    if hallucination_report:
-        print(f"   Hallucinations caught & fixed: {len(hallucination_report)}")
 
     return state
 
@@ -282,15 +255,6 @@ def run_agent(resume_text: str, job_description: str) -> dict:
     if len(job_description) < MIN_JOB_DESC_CHARS:
         raise ValueError(f"Job description too short (minimum {MIN_JOB_DESC_CHARS} characters)")
 
-    # ← INPUT HASHING FOR DEBUGGING
-    input_hashes = hash_inputs(resume_text, job_description)
-    print(f"\n🔐 INPUT FINGERPRINT:")
-    print(f"   Resume Hash:    {input_hashes['resume_hash']}")
-    print(f"   Job Hash:       {input_hashes['job_hash']}")
-    print(f"   Combined Hash:  {input_hashes['combined_hash']}")
-    print(f"   (Use these to verify if inputs are identical across runs)")
-
-
     initial_state = {
         "resume_text": resume_text,
         "job_description": job_description,
@@ -306,10 +270,8 @@ def run_agent(resume_text: str, job_description: str) -> dict:
         "needs_retry": False,
         "retry_agent": "none",
         "retry_count": 0,
-        "hallucination_report": [],
         "final_report": {},
-        "messages": [],
-        "input_hashes": input_hashes,  # ← DEBUG: Track input consistency
+        "messages": []
     }
 
     app = build_graph()
