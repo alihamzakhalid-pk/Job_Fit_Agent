@@ -2,22 +2,11 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from graph.state import AgentState
 from tools.ats_scorer import score_full_resume, extract_bullets_from_resume
-from tools.retry_utils import llm_retry_decorator
-from config import (
-    LLM_MODEL,
-    LLM_TEMPERATURE_REWRITING,
-    LLM_TIMEOUT,
-    MAX_JOB_DESC_CHARS,
-    ATS_SCORING_CONFIG,
-)
 import json
 
-# Initialize LLM once at module level (using rewriting temperature)
-llm = ChatGroq(
-    model=LLM_MODEL,
-    temperature=LLM_TEMPERATURE_REWRITING,
-    timeout=LLM_TIMEOUT,
-)
+# ─────────────────────────────────────────
+# REWRITER PROMPT — TRUTH CONSTRAINED
+# ─────────────────────────────────────────
 
 REWRITER_PROMPT = """
 You are an expert resume writer. Your job is to rewrite resume bullets
@@ -95,25 +84,6 @@ prompt = PromptTemplate(
     input_variables=["resume_text", "original_bullets", "job_description", "skill_gaps"]
 )
 
-
-def format_bullets_for_prompt(bullets: list) -> str:
-    if not bullets:
-        return "No bullets found"
-    return "\n".join([f"- {b}" for b in bullets])
-
-
-def format_gaps_for_prompt(skill_gaps: dict) -> str:
-    gaps = skill_gaps.get("skill_gaps", [])
-    strengths = skill_gaps.get("strengths", [])
-    lines = []
-    if strengths:
-        lines.append(f"Candidate strengths: {', '.join(strengths)}")
-    critical = [g["name"] for g in gaps if g.get("priority") == "critical"]
-    if critical:
-        lines.append(f"Missing skills — do NOT claim candidate has these: {', '.join(critical)}")
-    return "\n".join(lines) if lines else "No gap data"
-
-
 # ─────────────────────────────────────────
 # HALLUCINATION CHECKER PROMPT
 # ─────────────────────────────────────────
@@ -158,7 +128,38 @@ Return ONLY valid JSON:
 """
 
 
-def run_hallucination_check(llm_check, resume_text: str, rewritten_bullets: list) -> tuple:
+# ─────────────────────────────────────────
+# HELPER FUNCTIONS
+# ─────────────────────────────────────────
+
+def format_bullets_for_prompt(bullets: list) -> str:
+    if not bullets:
+        return "No bullets found"
+    return "\n".join([f"- {b}" for b in bullets])
+
+
+def format_gaps_for_prompt(skill_gaps: dict) -> str:
+    gaps     = skill_gaps.get("skill_gaps", [])
+    strengths = skill_gaps.get("strengths", [])
+    lines    = []
+    if strengths:
+        lines.append(f"Candidate strengths: {', '.join(strengths)}")
+    critical = [g["name"] for g in gaps if g.get("priority") == "critical"]
+    if critical:
+        lines.append(f"Missing skills — do NOT claim candidate has these: {', '.join(critical)}")
+    return "\n".join(lines) if lines else "No gap data"
+
+
+def clean_and_parse_json(raw_output: str) -> dict:
+    raw_output = raw_output.replace("```json", "").replace("```", "").strip()
+    start = raw_output.find("{")
+    end   = raw_output.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError("No JSON found in output")
+    return json.loads(raw_output[start:end])
+
+
+def run_hallucination_check(llm, resume_text: str, rewritten_bullets: list) -> tuple:
     """
     Cross-checks every rewritten bullet against original resume text.
 
@@ -169,7 +170,7 @@ def run_hallucination_check(llm_check, resume_text: str, rewritten_bullets: list
     try:
         bullets_text = json.dumps(rewritten_bullets, indent=2)
 
-        response = llm_check.invoke(
+        response = llm.invoke(
             HALLUCINATION_CHECK_PROMPT.format(
                 resume_text=resume_text[:3000],
                 rewritten_bullets=bullets_text[:3000]
@@ -191,20 +192,16 @@ def run_hallucination_check(llm_check, resume_text: str, rewritten_bullets: list
         return [], rewritten_bullets
 
 
-def clean_and_parse_json(raw_output: str) -> dict:
-    raw_output = raw_output.replace("```json", "").replace("```", "").strip()
-    start = raw_output.find("{")
-    end = raw_output.rfind("}") + 1
-    if start == -1 or end == 0:
-        raise ValueError("No JSON found in output")
-    return json.loads(raw_output[start:end])
-
+# ─────────────────────────────────────────
+# MAIN AGENT FUNCTION
+# ─────────────────────────────────────────
 
 def resume_rewriter_agent(state: AgentState) -> AgentState:
     """
     Agent 4: Rewrites resume bullets with TRUTH CONSTRAINTS + HALLUCINATION CHECK.
 
     Design decisions:
+    - temperature=0 to minimize creativity/hallucination
     - Prompt explicitly forbids inventing metrics
     - Ground truth (original resume) passed directly into prompt
     - Second LLM call verifies every bullet after rewriting
@@ -217,12 +214,19 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
 
     print("\n✍️  Agent 4: Rewriting resume with truth constraints...")
 
-    try:
-        parsed_resume = state["parsed_resume"]
-        skill_gaps = state["skill_gaps"]
-        job_description = state["job_description"]
-        resume_text = state["resume_text"]  # ← ground truth
+    # temperature=0 — deterministic, less hallucination
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        temperature=0,
+    )
 
+    try:
+        parsed_resume   = state["parsed_resume"]
+        skill_gaps      = state["skill_gaps"]
+        job_description = state["job_description"]
+        resume_text     = state["resume_text"]  # ← ground truth
+
+        # ── Step 1: Extract original bullets ──
         original_bullets = extract_bullets_from_resume(parsed_resume)
 
         if not original_bullets:
@@ -234,24 +238,23 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
 
         print(f"   → Found {len(original_bullets)} bullet points")
 
-        print("   → Scoring original resume (before)...")
+        # ── Step 2: Score BEFORE rewrite ──
+        print("   → Scoring original bullets (ATS before)...")
         before_result = score_full_resume(original_bullets)
-        ats_before = before_result["overall_score"]
+        ats_before    = before_result["overall_score"]
         print(f"   → ATS Score BEFORE: {ats_before}/100")
 
+        # ── Step 3: Rewrite with truth-constrained prompt ──
         print("   → Rewriting with truth-constrained prompt...")
-        @llm_retry_decorator
-        def rewrite_with_retry():
-            chain = prompt | llm
-            return chain.invoke({
-                "resume_text": resume_text[:3000],
-                "original_bullets": format_bullets_for_prompt(original_bullets),
-                "job_description": job_description[:MAX_JOB_DESC_CHARS],
-                "skill_gaps": format_gaps_for_prompt(skill_gaps)
-            })
-        
-        response = rewrite_with_retry()
-        rewrite_data = clean_and_parse_json(response.content)
+        chain    = prompt | llm
+        response = chain.invoke({
+            "resume_text":      resume_text[:3000],
+            "original_bullets": format_bullets_for_prompt(original_bullets),
+            "job_description":  job_description[:1500],
+            "skill_gaps":       format_gaps_for_prompt(skill_gaps)
+        })
+
+        rewrite_data      = clean_and_parse_json(response.content)
         rewritten_bullets = rewrite_data.get("rewritten_bullets", [])
 
         # ── Step 4: Hallucination check ──
@@ -268,42 +271,44 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         else:
             print(f"   ✅ Hallucination check passed — all bullets verified")
 
-        rewrite_data["hallucinations_found"] = len(violations) > 0
+        rewrite_data["hallucination_violations"] = violations
+        rewrite_data["hallucinations_found"]     = len(violations) > 0
 
+        # ── Step 5: Score AFTER rewrite ──
+        print("   → Scoring rewritten bullets (ATS after)...")
         rewritten_list = [
             item.get("rewritten", "")
             for item in rewrite_data.get("rewritten_bullets", [])
             if item.get("rewritten")
         ]
 
-        print("   → Scoring rewritten resume (after)...")
         after_result = score_full_resume(rewritten_list)
-        ats_after = after_result["overall_score"]
-        improvement = ats_after - ats_before
+        ats_after    = after_result["overall_score"]
+        improvement  = ats_after - ats_before
         print(f"   → ATS Score AFTER: {ats_after}/100 (+{improvement})")
 
-        rewrite_data["ats_before"] = {"score": ats_before, "breakdown": before_result["breakdown"]}
-        rewrite_data["ats_after"] = {"score": ats_after, "breakdown": after_result["breakdown"]}
+        rewrite_data["ats_before"]  = {"score": ats_before, "breakdown": before_result["breakdown"]}
+        rewrite_data["ats_after"]   = {"score": ats_after,  "breakdown": after_result["breakdown"]}
         rewrite_data["improvement"] = improvement
 
-        state["rewritten_bullets"] = rewrite_data
-        state["ats_score_before"] = ats_before
-        state["ats_score_after"] = ats_after
-        state["interview_questions"] = rewrite_data.get("interview_questions", [])
+        # ── Step 6: Write everything to state ──
+        state["rewritten_bullets"]    = rewrite_data
+        state["ats_score_before"]     = ats_before
+        state["ats_score_after"]      = ats_after
+        state["interview_questions"]  = rewrite_data.get("interview_questions", [])
         state["hallucination_report"] = violations
 
-        print(f"✅ Agent 4: Complete")
+        print(f"✅ Agent 4 Complete")
         print(f"   ATS: {ats_before} → {ats_after} (+{improvement})")
-        print(f"   Interview questions: {len(state['interview_questions'])}")
-        if violations:
-            print(f"   Hallucinations caught & fixed: {len(violations)}")
+        print(f"   Hallucinations caught and removed: {len(violations)}")
+        print(f"   Interview questions generated: {len(state['interview_questions'])}")
 
     except Exception as e:
         print(f"❌ Agent 4 Error: {e}")
-        state["rewritten_bullets"] = {}
-        state["ats_score_before"] = 0
-        state["ats_score_after"] = 0
-        state["interview_questions"] = []
+        state["rewritten_bullets"]    = {}
+        state["ats_score_before"]     = 0
+        state["ats_score_after"]      = 0
+        state["interview_questions"]  = []
         state["hallucination_report"] = []
 
     return state

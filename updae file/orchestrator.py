@@ -5,43 +5,7 @@ from agents.resume_parser import resume_parser_agent
 from agents.market_research import market_research_agent
 from agents.gap_analyzer import gap_analyzer_agent
 from agents.resume_rewriter import resume_rewriter_agent
-from tools.retry_utils import llm_retry_decorator
-from config import LLM_MODEL, LLM_TEMPERATURE_PARSING, LLM_TEMPERATURE_REFLECTION, LLM_TIMEOUT, MIN_RESUME_CHARS, MIN_JOB_DESC_CHARS
 import json
-import hashlib
-
-# Initialize LLM for orchestrator
-llm = ChatGroq(
-    model=LLM_MODEL,
-    temperature=LLM_TEMPERATURE_PARSING,
-    timeout=LLM_TIMEOUT,
-)
-
-# Separate LLM for self-reflection (with variation)
-llm_reflection = ChatGroq(
-    model=LLM_MODEL,
-    temperature=LLM_TEMPERATURE_REFLECTION,
-    timeout=LLM_TIMEOUT,
-)
-
-
-def hash_inputs(resume_text: str, job_description: str) -> dict:
-    """
-    Create reproducible hashes of inputs to verify consistency.
-    Use this to debug why results differ.
-    """
-    resume_hash = hashlib.md5(resume_text.encode()).hexdigest()[:8]
-    job_hash = hashlib.md5(job_description.encode()).hexdigest()[:8]
-    combined_hash = hashlib.md5(
-        f"{resume_text}{job_description}".encode()
-    ).hexdigest()[:8]
-    
-    return {
-        "resume_hash": resume_hash,
-        "job_hash": job_hash,
-        "combined_hash": combined_hash
-    }
-
 
 
 def self_reflection_node(state: AgentState) -> AgentState:
@@ -51,6 +15,12 @@ def self_reflection_node(state: AgentState) -> AgentState:
     """
 
     print("\n🧠 Orchestrator: Running self reflection...")
+
+    # ← ChatGroq inside function
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        temperature=0,
+    )
 
     match_score = state.get("match_score", 0)
     skill_gaps = state.get("skill_gaps", {})
@@ -79,64 +49,28 @@ def self_reflection_node(state: AgentState) -> AgentState:
     4. Match score should be between 10 and 95
     5. Learning roadmap must exist
 
-    SCORING GUIDELINES:
-    - 0.9-1.0: All rules met, excellent quality
-    - 0.7-0.8: Most rules met, good quality
-    - 0.5-0.6: Some rules missing, acceptable
-    - Below 0.5: Critical issues, needs retry
-
-    Evaluate the outputs above and return:
+    Return:
     {{
-        "confidence_score": (CALCULATE THIS - float between 0 and 1 based on rules above),
-        "quality_issues": ["list of any issues found"],
-        "needs_retry": (true if confidence_score < 0.5, false otherwise),
-        "retry_agent": "none or agent_name",
-        "reflection_summary": "one sentence quality verdict based on the score"
+        "confidence_score": 0.8,
+        "quality_issues": [],
+        "needs_retry": false,
+        "retry_agent": "none",
+        "reflection_summary": "one sentence quality verdict"
     }}
     """
 
     try:
-        @llm_retry_decorator
-        def reflect_with_retry():
-            return llm_reflection.invoke(reflection_prompt)
-        
-        response = reflect_with_retry()
+        response = llm.invoke(reflection_prompt)
         raw = response.content.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
         reflection = json.loads(raw[start:end])
 
-        # Get confidence score from LLM
-        confidence = reflection.get("confidence_score", 0.5)
-        
-        # Validate and fallback to programmatic calculation if needed
-        if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
-            # Calculate programmatically based on quality rules
-            score = 0.0
-            has_market_skills = len(market_skills.get('skills', [])) >= 5
-            has_skill_gaps = len(skill_gaps.get('skill_gaps', [])) >= 2
-            ats_improved = ats_after > ats_before
-            match_in_range = 10 <= match_score <= 95
-            has_roadmap = bool(skill_gaps.get('learning_roadmap'))
-            has_questions = bool(state.get('interview_questions'))
-            
-            # Score: 1 point per rule met, divide by total rules
-            rules_met = sum([
-                has_market_skills,      # Rule 1
-                has_skill_gaps,         # Rule 2
-                ats_improved,           # Rule 3
-                match_in_range,         # Rule 4
-                has_roadmap,            # Rule 5
-                has_questions           # Bonus: interview questions
-            ])
-            confidence = rules_met / 6.0
-        
-        state["confidence_score"] = confidence
-        state["needs_retry"] = reflection.get("needs_retry", confidence < 0.5)
+        state["confidence_score"] = reflection.get("confidence_score", 0.5)
+        state["needs_retry"] = reflection.get("needs_retry", False)
         state["retry_agent"] = reflection.get("retry_agent", "none")
 
-        print(f"   → Confidence Score: {state['confidence_score']:.1%}")
-        print(f"   → Quality Issues: {reflection.get('quality_issues', [])}")
+        print(f"   → Confidence Score: {state['confidence_score']}")
         print(f"   → Needs Retry: {state['needs_retry']}")
         print(f"   → Verdict: {reflection.get('reflection_summary', '')}")
 
@@ -161,11 +95,11 @@ def compile_final_report(state: AgentState) -> AgentState:
     rewritten = state.get("rewritten_bullets", {})
     questions = state.get("interview_questions", [])
     parsed_resume = state.get("parsed_resume", {})
-    hallucination_report = state.get("hallucination_report", [])
 
     gaps = skill_gaps.get("skill_gaps", [])
     critical_gaps = [g for g in gaps if g.get("priority") == "critical"]
     important_gaps = [g for g in gaps if g.get("priority") == "important"]
+    hallucination_report = state.get("hallucination_report", [])
 
     report = {
         "candidate_name": parsed_resume.get("personal_info", {}).get("name", "Candidate"),
@@ -180,7 +114,7 @@ def compile_final_report(state: AgentState) -> AgentState:
         "learning_roadmap": skill_gaps.get("learning_roadmap", []),
         "rewritten_bullets": rewritten.get("rewritten_bullets", []),
         "resume_summary": rewritten.get("resume_summary", ""),
-        "interview_questions": questions,  # ← Include ALL questions (10+), not just 5
+        "interview_questions": questions[:5],
         "sources": market_skills.get("sources", [])[:5],
         "candidate_summary": skill_gaps.get("candidate_summary", ""),
         "quick_wins": skill_gaps.get("quick_wins", []),
@@ -194,8 +128,6 @@ def compile_final_report(state: AgentState) -> AgentState:
     print(f"✅ Final report compiled for {report['candidate_name']}")
     print(f"   Match Score: {report['match_score']}%")
     print(f"   ATS: {report['ats_score_before']} → {report['ats_score_after']}")
-    if hallucination_report:
-        print(f"   Hallucinations caught & fixed: {len(hallucination_report)}")
 
     return state
 
@@ -271,25 +203,6 @@ def run_agent(resume_text: str, job_description: str) -> dict:
     print("🚀 STARTING JOB FIT AGENT")
     print("="*50)
 
-    # ← INPUT VALIDATION
-    if not resume_text or not resume_text.strip():
-        raise ValueError("Resume text cannot be empty")
-    if not job_description or not job_description.strip():
-        raise ValueError("Job description cannot be empty")
-    if len(resume_text) < MIN_RESUME_CHARS:
-        raise ValueError(f"Resume too short (minimum {MIN_RESUME_CHARS} characters)")
-    if len(job_description) < MIN_JOB_DESC_CHARS:
-        raise ValueError(f"Job description too short (minimum {MIN_JOB_DESC_CHARS} characters)")
-
-    # ← INPUT HASHING FOR DEBUGGING
-    input_hashes = hash_inputs(resume_text, job_description)
-    print(f"\n🔐 INPUT FINGERPRINT:")
-    print(f"   Resume Hash:    {input_hashes['resume_hash']}")
-    print(f"   Job Hash:       {input_hashes['job_hash']}")
-    print(f"   Combined Hash:  {input_hashes['combined_hash']}")
-    print(f"   (Use these to verify if inputs are identical across runs)")
-
-
     initial_state = {
         "resume_text": resume_text,
         "job_description": job_description,
@@ -301,6 +214,7 @@ def run_agent(resume_text: str, job_description: str) -> dict:
         "ats_score_before": 0,
         "ats_score_after": 0,
         "interview_questions": [],
+        "hallucination_report": [],
         "confidence_score": 0.0,
         "needs_retry": False,
         "retry_agent": "none",
