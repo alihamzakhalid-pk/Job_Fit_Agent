@@ -20,58 +20,52 @@ llm = ChatGroq(
 )
 
 REWRITER_PROMPT = """
-You are an expert resume writer, ATS optimization specialist, AND interview coach.
-Rewrite resume bullets to be ATS-optimized AND generate comprehensive interview prep questions.
-Return ONLY valid JSON. No explanation. No extra text.
+You are an EXPERT ATS-optimized resume writer. Your task: rewrite bullets to MAXIMIZE ATS score.
 
-ORIGINAL BULLET POINTS:
+CRITICAL RULES (follow EXACTLY):
+1. EVERY bullet MUST start with power verb: developed, engineered, built, designed, optimized, deployed, automated, achieved
+2. EVERY bullet MUST include a NUMBER/METRIC: %, x improvement, timeframe, quantity
+3. EVERY bullet MUST be 15-22 words (count carefully)
+4. NEVER use weak phrases: "worked on", "helped", "involved in", "responsible for", "participated"
+5. MUST include 2-3 keywords from job description per bullet
+6. MUST show measurable IMPACT not just tasks
+
+ORIGINAL BULLETS (optimize these):
 {original_bullets}
 
-TARGET JOB DESCRIPTION:
+JOB DESCRIPTION (extract keywords):
 {job_description}
 
-CANDIDATE STRENGTHS TO HIGHLIGHT:
+CANDIDATE PROFILE:
 {skill_gaps}
 
-RESUME REWRITING RULES:
-1. Start every bullet with a strong action verb
-2. Add specific metrics and numbers where possible
-3. Include relevant keywords from job description
-4. Keep each bullet 15-25 words
-5. Remove weak phrases like worked on or helped with
-6. Show impact not just tasks
+REWRITE EXAMPLES:
+❌ WEAK: "Worked on machine learning models for data analysis"
+✅ STRONG: "Engineered 5 machine learning models improving prediction accuracy by 34%, reducing processing time by 40%"
 
-INTERVIEW QUESTIONS RULES:
-Generate at least 10 most important interview questions that would REALLY be asked:
-- 3-4 TECHNICAL questions (testing skills, tools, frameworks)
-- 3-4 BEHAVIORAL questions (testing soft skills, leadership, collaboration)
-- 2-3 SITUATIONAL questions (testing problem-solving, decision-making)
-Each question should be:
-- Directly related to the job description
-- Challenging and realistic (what real interviewers ask)
-- Testing either their strengths or skill gaps
-- Clear and professional
+❌ WEAK: "Responsible for backend development"
+✅ STRONG: "Architected scalable backend system handling 2M+ requests/day using FastAPI and PostgreSQL"
 
-Return this exact JSON:
+GENERATE THIS JSON EXACTLY:
 {{
     "rewritten_bullets": [
         {{
-            "original": "original bullet text",
-            "rewritten": "improved bullet text",
-            "improvement_reason": "why this is better",
-            "keywords_added": []
+            "original": "original text",
+            "rewritten": "NEW OPTIMIZED TEXT - 15-22 words, starts with power verb, has number, job keywords",
+            "improvement_reason": "Why this is better for ATS",
+            "keywords_added": ["keyword1", "keyword2"]
         }}
     ],
     "interview_questions": [
         {{
-            "question": "Full question text here",
-            "category": "one of: technical/behavioral/situational",
-            "why_asked": "why an interviewer would ask this question for this role",
-            "tip": "how to answer this question well based on the job description",
-            "difficulty": "one of: junior/mid/senior"
+            "question": "Specific interview question",
+            "category": "technical/behavioral/situational",
+            "why_asked": "Why recruiter asks this",
+            "tip": "How to answer well",
+            "difficulty": "junior/mid/senior"
         }}
     ],
-    "resume_summary": "A powerful 2-3 sentence professional summary for this specific job"
+    "resume_summary": "2-3 sentence powerful summary"
 }}
 """
 
@@ -127,9 +121,9 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         if not original_bullets:
             print("   ⚠️  No bullets found — using placeholder bullets")
             original_bullets = [
-                "Worked on machine learning projects",
-                "Helped team with data analysis tasks",
-                "Participated in software development"
+                "Developed backend systems processing 100K+ transactions",
+                "Engineered machine learning pipeline improving accuracy by 25%",
+                "Optimized database queries reducing latency by 60%"
             ]
 
         print(f"   → Found {len(original_bullets)} bullet points")
@@ -139,18 +133,42 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         ats_before = before_result["overall_score"]
         print(f"   → ATS Score BEFORE: {ats_before}/100")
 
-        print("   → Rewriting bullets with LLM...")
-        @llm_retry_decorator
-        def rewrite_with_retry():
-            chain = prompt | llm
-            return chain.invoke({
-                "original_bullets": format_bullets_for_prompt(original_bullets),
-                "job_description": job_description[:MAX_JOB_DESC_CHARS],
-                "skill_gaps": format_gaps_for_prompt(skill_gaps)
-            })
+        print("   → Rewriting bullets with LLM (with retry)...")
+        rewrite_attempts = 0
+        rewrite_data = None
+        last_error = None
         
-        response = rewrite_with_retry()
-        rewrite_data = clean_and_parse_json(response.content)
+        while rewrite_attempts < 3:
+            try:
+                rewrite_attempts += 1
+                @llm_retry_decorator
+                def rewrite_with_retry():
+                    chain = prompt | llm
+                    return chain.invoke({
+                        "original_bullets": format_bullets_for_prompt(original_bullets),
+                        "job_description": job_description[:MAX_JOB_DESC_CHARS],
+                        "skill_gaps": format_gaps_for_prompt(skill_gaps)
+                    })
+                
+                response = rewrite_with_retry()
+                rewrite_data = clean_and_parse_json(response.content)
+                break  # Success - exit retry loop
+                
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parsing failed (attempt {rewrite_attempts}/3): {e}"
+                if rewrite_attempts < 3:
+                    print(f"   ⚠️  {last_error} — retrying...")
+                    continue
+                raise
+            except Exception as e:
+                last_error = f"LLM call failed (attempt {rewrite_attempts}/3): {e}"
+                if rewrite_attempts < 3:
+                    print(f"   ⚠️  {last_error} — retrying...")
+                    continue
+                raise
+
+        if not rewrite_data or "rewritten_bullets" not in rewrite_data:
+            raise ValueError("Invalid rewrite response structure")
 
         rewritten_list = [
             item["rewritten"]
@@ -158,14 +176,19 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
             if item.get("rewritten")
         ]
 
+        if not rewritten_list:
+            raise ValueError("No rewritten bullets generated")
+
         print("   → Scoring rewritten resume (after)...")
         after_result = score_full_resume(rewritten_list)
         ats_after = after_result["overall_score"]
+        improvement = ats_after - ats_before
         print(f"   → ATS Score AFTER: {ats_after}/100")
+        print(f"   → IMPROVEMENT: +{improvement} points")
 
         rewrite_data["ats_before"] = {"score": ats_before, "breakdown": before_result["breakdown"]}
         rewrite_data["ats_after"] = {"score": ats_after, "breakdown": after_result["breakdown"]}
-        rewrite_data["improvement"] = ats_after - ats_before
+        rewrite_data["improvement"] = improvement
 
         state["rewritten_bullets"] = rewrite_data
         state["ats_score_before"] = ats_before
@@ -173,14 +196,27 @@ def resume_rewriter_agent(state: AgentState) -> AgentState:
         state["interview_questions"] = rewrite_data.get("interview_questions", [])
 
         print(f"✅ Agent 4: Complete")
-        print(f"   ATS: {ats_before} → {ats_after} (+{ats_after - ats_before})")
+        print(f"   ATS: {ats_before} → {ats_after} (+{improvement})")
         print(f"   Interview questions: {len(state['interview_questions'])}")
 
     except Exception as e:
-        print(f"❌ Agent 4 Error: {e}")
-        state["rewritten_bullets"] = {}
+        print(f"❌ Agent 4 CRITICAL ERROR: {e}")
+        print(f"   Falling back to placeholder results...")
+        
+        # Create fallback rewritten bullets from original
         state["ats_score_before"] = 0
         state["ats_score_after"] = 0
+        state["rewritten_bullets"] = {
+            "rewritten_bullets": [],
+            "interview_questions": [],
+            "resume_summary": "Professional with diverse experience",
+            "ats_before": {"score": 0, "breakdown": []},
+            "ats_after": {"score": 0, "breakdown": []},
+            "improvement": 0
+        }
         state["interview_questions"] = []
+        
+        # Mark state so orchestrator knows this needs attention
+        state["resume_rewriter_error"] = str(e)
 
     return state
