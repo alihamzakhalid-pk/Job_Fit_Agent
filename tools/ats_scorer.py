@@ -36,6 +36,7 @@ def score_bullet_point(bullet: str) -> dict:
     bullet_lower = bullet.lower()
     score = 0
     feedback = []
+    details = {}
 
     # Check 1: Starts with action verb (25 points)
     starts_with_action = any(
@@ -43,8 +44,10 @@ def score_bullet_point(bullet: str) -> dict:
     )
     if starts_with_action:
         score += 25
+        details["action_verb"] = "✓"
     else:
         feedback.append("Start with a strong action verb")
+        details["action_verb"] = "✗"
 
     # Check 2: Contains quantification (25 points)
     has_numbers = any(
@@ -53,25 +56,32 @@ def score_bullet_point(bullet: str) -> dict:
     )
     if has_numbers:
         score += 25
+        details["quantification"] = "✓"
     else:
         feedback.append("Add numbers/metrics to quantify impact")
+        details["quantification"] = "✗"
 
     # Check 3: No weak phrases (20 points)
     has_weak = any(phrase in bullet_lower for phrase in WEAK_PHRASES)
     if not has_weak:
         score += 20
+        details["no_weak_phrases"] = "✓"
     else:
         feedback.append("Remove weak phrases like 'worked on' or 'helped with'")
+        details["no_weak_phrases"] = "✗"
 
     # Check 4: Length is right (15 points)
     # ATS prefers 15-30 words
     word_count = len(bullet.split())
     if 15 <= word_count <= 30:
         score += 15
+        details["length"] = f"✓ ({word_count}w)"
     elif word_count < 15:
-        feedback.append("Too short — add more detail")
+        feedback.append(f"Too short ({word_count}w) — add more detail")
+        details["length"] = f"✗ short ({word_count}w)"
     else:
-        feedback.append("Too long — keep under 30 words")
+        feedback.append(f"Too long ({word_count}w) — keep under 30 words")
+        details["length"] = f"✗ long ({word_count}w)"
 
     # Check 5: Contains technical keywords (15 points)
     # Basic check — does it mention any tech?
@@ -85,12 +95,15 @@ def score_bullet_point(bullet: str) -> dict:
     )
     if has_tech:
         score += 15
+        details["tech_keywords"] = "✓"
     else:
         feedback.append("Include specific technical tools or technologies")
+        details["tech_keywords"] = "✗"
 
     return {
         "score": score,
-        "feedback": feedback
+        "feedback": feedback,
+        "details": details
     }
 
 
