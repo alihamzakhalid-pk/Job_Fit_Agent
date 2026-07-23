@@ -41,27 +41,71 @@ export default function App() {
       })
     }, 2200)
 
+    const finish = (success, payload) => {
+      clearInterval(stepTimer)
+      setCompleted(STEPS.map(s => s.id))
+      setStepIndex(STEPS.length)
+
+      if (success) {
+        setTimeout(() => {
+          setReport(payload)
+          setPhase('done')
+        }, 600)
+      } else {
+        setError(payload || 'Something went wrong')
+        setPhase('input')
+      }
+    }
+
+    // Polls job status every 3s. Tolerates a handful of consecutive network
+    // blips (e.g. phone briefly losing signal) instead of failing immediately —
+    // the job keeps running server-side regardless of the client connection.
+    const pollStatus = async (jobId) => {
+      const MAX_CONSECUTIVE_FAILURES = 5
+      let failures = 0
+
+      while (true) {
+        await new Promise(r => setTimeout(r, 3000))
+
+        try {
+          const res = await axios.get(`${API_BASE_URL}/status/${jobId}`, { timeout: 15000 })
+          failures = 0
+
+          if (res.data.status === 'done') {
+            finish(true, res.data.report)
+            return
+          }
+          if (res.data.status === 'error') {
+            finish(false, res.data.error)
+            return
+          }
+          // status === 'processing' -> keep polling
+        } catch (err) {
+          failures += 1
+          if (failures >= MAX_CONSECUTIVE_FAILURES) {
+            clearInterval(stepTimer)
+            setError('Lost connection to the server — please try again')
+            setPhase('input')
+            return
+          }
+        }
+      }
+    }
+
     try {
       const form = new FormData()
       form.append('resume', file)
       form.append('job_description', jobDesc)
 
       const res = await axios.post(`${API_BASE_URL}/analyze`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
       })
 
-      clearInterval(stepTimer)
-      setCompleted(STEPS.map(s => s.id))
-      setStepIndex(STEPS.length)
-
-      if (res.data.success) {
-        setTimeout(() => {
-          setReport(res.data.report)
-          setPhase('done')
-        }, 600)
+      if (res.data.job_id) {
+        pollStatus(res.data.job_id)
       } else {
-        setError(res.data.error || 'Something went wrong')
-        setPhase('input')
+        finish(false, res.data.error || 'Something went wrong')
       }
     } catch (err) {
       clearInterval(stepTimer)
