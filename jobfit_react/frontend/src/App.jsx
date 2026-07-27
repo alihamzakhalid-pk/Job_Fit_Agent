@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import axios from 'axios'
 import UploadSection from './components/UploadSection.jsx'
 import Pipeline from './components/Pipeline.jsx'
@@ -23,6 +23,34 @@ export default function App() {
   const [completedSteps, setCompleted]  = useState([])
   const [report, setReport]             = useState(null)
   const [error, setError]               = useState(null)
+
+  // Render's free tier sleeps after 15 min idle and can take 20-60s to wake
+  // up. Ping it as soon as the page loads so it's already warm by the time
+  // the user finishes uploading a resume and clicks Analyze — this fires in
+  // the background and its result is ignored either way.
+  useEffect(() => {
+    axios.get(`${API_BASE_URL}/`, { timeout: 60000 }).catch(() => {})
+  }, [])
+
+  // Submits with a generous timeout (covers a cold backend waking up) and
+  // retries once on network/timeout/5xx errors, since those usually mean
+  // "server was still waking up" rather than a real failure. Validation
+  // errors (4xx) are real and returned immediately without retrying.
+  const submitAnalyze = async (form) => {
+    const MAX_ATTEMPTS = 2
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await axios.post(`${API_BASE_URL}/analyze`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 120000,
+        })
+      } catch (err) {
+        const isRetryable = !err.response || err.response.status >= 500
+        if (!isRetryable || attempt >= MAX_ATTEMPTS) throw err
+        await new Promise(r => setTimeout(r, 2000))
+      }
+    }
+  }
 
   const handleAnalyze = useCallback(async () => {
     if (!file || !jobDesc.trim()) return
@@ -97,10 +125,7 @@ export default function App() {
       form.append('resume', file)
       form.append('job_description', jobDesc)
 
-      const res = await axios.post(`${API_BASE_URL}/analyze`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 30000,
-      })
+      const res = await submitAnalyze(form)
 
       if (res.data.job_id) {
         pollStatus(res.data.job_id)
